@@ -1,0 +1,140 @@
+#pragma once
+
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
+#include <sys/types.h>
+
+struct CAPS;
+
+struct CAP {
+
+	friend class CAPS;
+
+	public:
+
+		class LIST;
+
+		enum SET {
+			BOUNDING, PERMITTED, INHERITABLE, EFFECTIVE, AMBIENT
+		};
+
+		enum TYPE {
+			CHOWN, DAC_OVERRIDE, DAC_READ_SEARCH, FOWNER, FSETID,
+			KILL, SETGID, SETUID, SETPCAP, LINUX_IMMUTABLE,
+			NET_BIND_SERVICE, NET_BROADCAST, NET_ADMIN, NET_RAW,
+			IPC_LOCK, IPC_OWNER, SYS_MODULE, SYS_RAWIO, SYS_CHROOT,
+			SYS_PTRACE, SYS_PACCT, SYS_ADMIN, SYS_BOOT, SYS_NICE,
+			SYS_RESOURCE, SYS_TIME, SYS_TTY_CONFIG, MKNOD, LEASE,
+			AUDIT_WRITE, AUDIT_CONTROL, SETFCAP, MAC_OVERRIDE,
+			MAC_ADMIN, SYSLOG, WAKE_ALARM, BLOCK_SUSPEND, AUDIT_READ,
+			PERFMON, BPF, CHECKPOINT_RESTORE
+		};
+
+		operator CAP::TYPE() const;
+		operator std::string() const;
+		operator int() const;
+
+		bool operator <(const CAP& other) const;
+		bool operator <(const CAP::TYPE& type) const;
+
+		bool operator ==(const std::string& name) const;
+		bool operator ==(const CAP::TYPE& type) const;
+		bool operator ==(const CAP& other) const;
+		bool operator ==(int value) const;
+
+		bool operator !=(const std::string& name) const;
+		bool operator !=(const CAP::TYPE& type) const;
+		bool operator !=(const CAP& other) const;
+		bool operator !=(int value) const;
+
+		CAP& operator =(const std::string& name);
+		CAP& operator =(const CAP::TYPE& type);
+		CAP& operator =(const CAP& other);
+		CAP& operator =(int value);
+
+		CAP::TYPE type() const;
+		std::string name() const;
+		int value() const;
+
+		std::string to_string() const;
+		int to_int() const;
+
+		CAP(const std::string& name);
+		CAP(const CAP::TYPE& type) : _type(type) {}
+		CAP(const CAP& other) : _type(other._type) {}
+		CAP(int value);
+
+		friend std::ostream& operator <<(std::ostream& os, const CAP& c);
+
+	private:
+		CAP::TYPE _type;
+};
+
+class CAPS {
+
+	public:
+
+		using LIST = std::map<CAP, std::set<CAP::SET>>;
+		using size_type = std::map<CAP::SET, std::set<CAP>>::size_type;
+
+		using iterator = std::map<CAP::SET, std::set<CAP>>::iterator;
+		using const_iterator = std::map<CAP::SET, std::set<CAP>>::const_iterator;
+
+		CAPS& operator =(const CAPS& other);
+		CAPS& operator =(const std::map<CAP::SET, std::set<CAP>>& m);
+		CAPS& operator =(const std::initializer_list<std::pair<CAP::SET, std::set<CAP>>>& values);
+		CAPS& operator =(const LIST& l);
+
+		operator LIST() const;
+		LIST to_list() const;
+
+		std::set<CAP>& at(const CAP::SET& set);
+		const std::set<CAP>& at(const CAP::SET& set) const;
+
+		std::set<CAP>& operator [](const CAP::SET& set);
+		const std::set<CAP>& operator [](const CAP::SET& set) const;
+
+		iterator begin();
+		const_iterator begin() const;
+		const_iterator cbegin() const;
+
+		iterator end();
+		const_iterator end() const;
+		const_iterator cend() const;
+
+		bool empty() const;
+		size_type size() const;
+		size_type max_size() const;
+		void clear();
+		void emplace(const CAP::SET& s, const std::set<CAP>& c);
+		void erase(const CAP::SET& s);
+
+		iterator find(const CAP::SET& s);
+		const_iterator find(const CAP::SET& s) const;
+		bool contains(const CAP::SET& s) const;
+
+		CAPS();
+		CAPS(const CAPS& other);
+		CAPS(const std::map<CAP::SET, std::set<CAP>>& m);
+		CAPS(const std::initializer_list<std::pair<CAP::SET, std::set<CAP>>>& values);
+		CAPS(const LIST& l);
+
+		static std::set<CAP::TYPE> all();
+		static bool set(const CAPS& c);
+		static CAPS get(pid_t pid = -1);
+		static bool lock();
+		static bool change_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids, const CAPS& caps);
+
+		friend std::ostream& operator <<(std::ostream& os, const CAPS& cs);
+
+	private:
+
+		std::map<CAP::SET, std::set<CAP>> _m;
+};
+
+std::ostream& operator <<(std::ostream& os, const CAP::TYPE& type);
+std::ostream& operator <<(std::ostream& os, const CAP& c);
+std::ostream& operator <<(std::ostream& os, const CAPS& cs);
+std::ostream& operator <<(std::ostream& os, const CAPS::LIST& l);

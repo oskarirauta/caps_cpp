@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+
+objs/*.o
+list_caps
+set_caps
+set_user
