@@ -21,9 +21,10 @@ bool update_caps() {
 		{ CAP::SET::AMBIENT, { CAP::SYS_CHROOT }}
 	};
 
-	if ( !CAPS::set(caps)) {
-
-		std::cerr << "failed to set capabilities" << std::endl;
+	try {
+		caps.set();
+	} catch ( const std::runtime_error& e ) {
+		std::cerr << e.what() << std::endl;
 		return false;
 	}
 
@@ -50,10 +51,8 @@ int main(int argc, char** argv) {
 		pid = ::getpid();
 		std::cout << "child process started with pid " << pid << std::endl;
 
-		if ( !update_caps()) {
-			std::cerr << "child process cannot set capabilties" << std::endl;
+		if ( !update_caps())
 			exit(1);
-		}
 
 		sleep(200);
 		std::cout << "shell starts now" << std::endl;

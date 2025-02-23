@@ -59,6 +59,9 @@ struct CAP {
 		CAP(const CAP& other) : _type(other._type) {}
 		CAP(int value);
 
+		static size_t caps_max();
+		inline static size_t sets_max() { return 5; }
+
 		friend std::ostream& operator <<(std::ostream& os, const CAP& c);
 
 	private:

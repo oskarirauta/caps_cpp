@@ -46,6 +46,9 @@ static std::map<CAP::TYPE, std::pair<int, std::string>> names = {
 	{ CAP::TYPE::WAKE_ALARM, { CAP_WAKE_ALARM, "cap_wake_alarm" }},
 	{ CAP::TYPE::BLOCK_SUSPEND, { CAP_BLOCK_SUSPEND, "cap_block_suspend" }},
 	{ CAP::TYPE::AUDIT_READ, { CAP_AUDIT_READ, "cap_audit_read" }},
+	{ CAP::TYPE::PERFMON, { CAP_PERFMON, "cap_perfmon" }},
+	{ CAP::TYPE::BPF, { CAP_BPF, "cap_bpf" }},
+	{ CAP::TYPE::CHECKPOINT_RESTORE, { CAP_CHECKPOINT_RESTORE, "cap_checkpoint_restore" }},
 };
 
 static std::string str_to_lower(const std::string& str) {
@@ -56,6 +59,10 @@ static std::string str_to_lower(const std::string& str) {
 		if ( std::isupper(ch))
 			ch ^= 32;
 	return s;
+}
+
+size_t CAP::caps_max() {
+	return names.size();
 }
 
 CAP::operator CAP::TYPE() const {
@@ -192,12 +199,12 @@ CAP::CAP(int value) {
 	} else throw std::runtime_error("capability value " + std::to_string(value) + " is not supported");
 }
 
-std::set<CAP::TYPE> CAPS::all() {
+CAPS::SET CAPS::all() {
 
-	std::set<CAP::TYPE> types = {};
+	CAPS::SET types;
 
 	for ( const auto& e : names )
-		types.emplace(e.first);
+		types += CAP(e.first);
 
 	return types;
 }

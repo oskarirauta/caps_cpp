@@ -5,7 +5,8 @@ CAPS_OBJS:= \
 	objs/cap-ng_lookup_table.o \
 	objs/cap-ng_cap-ng.o \
 	objs/caps_cap.o \
-	objs/caps_caps.o
+	objs/caps_caps.o \
+	objs/caps_caps_set.o
 
 ifdef DROP_AMBIENT
 	CAPS_OBJS += \
@@ -28,4 +29,7 @@ objs/caps_cap.o: $(CAPS_DIR)/src/cap.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<;
 
 objs/caps_caps.o: $(CAPS_DIR)/src/caps.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<;
+
+objs/caps_caps_set.o: $(CAPS_DIR)/src/caps_set.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<;

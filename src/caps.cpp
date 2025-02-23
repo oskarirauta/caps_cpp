@@ -1,5 +1,7 @@
 #include <string>
 #include <vector>
+#include <cerrno>
+#include <cstring>
 #include <utility>
 #include <iostream>
 #include <algorithm>
@@ -15,39 +17,49 @@
 #include "capabilities/cap.hpp"
 #include "capabilities/caps.hpp"
 
-static bool contains_capset(const std::set<CAP::SET>& cs, const CAP::SET& c) {
+static std::string err_desc() {
 
-	return std::find_if(cs.begin(), cs.end(), [c](const CAP::SET& _cs) { return _cs == c; }) != cs.end();
-}
+	std::string str(::strerror(errno));
 
-static bool contains_cap(const std::set<CAP>& cs, const CAP& c) {
+	if ( !str.empty())
+		str[0] = static_cast<std::string::value_type>(::tolower(str[0]));
 
-	return std::find_if(cs.begin(), cs.end(), [c](const CAP& _cs) { return _cs == c; }) != cs.end();
+	return str;
 }
 
 CAPS& CAPS::operator =(const CAPS& other) {
-	this -> _m = other._m;
+	this -> bounding = other.bounding;
+	this -> permitted = other.permitted;
+	this -> inheritable = other.inheritable;
+	this -> effective = other.effective;
+	this -> ambient = other.ambient;
 	return *this;
 }
 
-CAPS& CAPS::operator =(const std::map<CAP::SET, std::set<CAP>>& m) {
-	this -> _m = m;
-	return *this;
-}
+CAPS& CAPS::operator =(const std::initializer_list<std::pair<CAP::SET, CAPS::SET>>& values) {
 
-CAPS& CAPS::operator =(const std::initializer_list<std::pair<CAP::SET, std::set<CAP>>>& values) {
+	this -> clear();
 
-	this -> _m.clear();
+	for ( auto& p : values ) {
 
-	for ( auto& p : values )
-		this -> _m.emplace(p.first, p.second);
+		if ( p.first == CAP::SET::BOUNDING )
+			this -> bounding = p.second;
+		else if ( p.first == CAP::SET::PERMITTED )
+			this -> permitted = p.second;
+		else if ( p.first == CAP::SET::INHERITABLE )
+			this -> inheritable = p.second;
+		else if ( p.first == CAP::SET::EFFECTIVE )
+			this -> effective = p.second;
+		else if ( p.first == CAP::SET::AMBIENT )
+			this -> ambient = p.second;
+	}
 
 	return *this;
 }
 
 CAPS& CAPS::operator =(const CAPS::LIST& l) {
 
-	this -> _m = {};
+	this -> clear();
 
 	for ( auto& p : l ) {
 
@@ -56,151 +68,265 @@ CAPS& CAPS::operator =(const CAPS::LIST& l) {
 
 		for ( auto& s: p.second ) {
 
-			std::set<CAP> caps;
-
-			if ( this -> contains(s))
-				caps = this -> _m.at(s);
-
-			caps.emplace(p.first);
-			this -> _m.emplace(s, caps);
-		}
+			if ( s == CAP::SET::BOUNDING )
+				this -> bounding += p.first;
+			else if ( s == CAP::SET::PERMITTED )
+				this -> permitted += p.first;
+			else if ( s == CAP::SET::INHERITABLE )
+				this -> inheritable += p.first;
+			else if ( s == CAP::SET::EFFECTIVE )
+				this -> effective += p.first;
+			else if ( s == CAP::SET::AMBIENT )
+				this -> ambient += p.first;
+ 		}
 	}
 
 	return *this;
 }
 
 CAPS::operator CAPS::LIST() const {
+	return this -> to_list(false);
+}
 
-	std::map<CAP::SET, std::set<CAP>> l = this -> _m;
+CAPS::LIST CAPS::to_list(bool all) const {
+
 	std::map<CAP, std::set<CAP::SET>> res = {};
 
 	for ( const auto& e : CAPS::all()) {
 
+		if ( !all && !this -> bounding.contains(e) && !this -> permitted.contains(e) &&
+			!this -> inheritable.contains(e) && !this -> effective.contains(e) &&
+			!this -> ambient.contains(e))
+			continue;
+
 		std::set<CAP::SET> sets = {};
-		if ( contains_cap(l[CAP::SET::BOUNDING], CAP(e)))
+		if ( this -> bounding.contains(CAP(e)))
 			sets.emplace(CAP::SET::BOUNDING);
-		if ( contains_cap(l[CAP::SET::PERMITTED], CAP(e)))
+		if ( this -> permitted.contains(CAP(e)))
 			sets.emplace(CAP::SET::PERMITTED);
-		if ( contains_cap(l[CAP::SET::INHERITABLE], CAP(e)))
+		if ( this -> inheritable.contains(CAP(e)))
 			sets.emplace(CAP::SET::INHERITABLE);
-		if ( contains_cap(l[CAP::SET::EFFECTIVE], CAP(e)))
+		if ( this -> effective.contains(CAP(e)))
 			sets.emplace(CAP::SET::EFFECTIVE);
-		if ( contains_cap(l[CAP::SET::AMBIENT], CAP(e)))
+		if ( this -> ambient.contains(CAP(e)))
 			sets.emplace(CAP::SET::AMBIENT);
 
-		res[CAP(e)] = sets;
-
+		res.emplace(CAP(e), sets);
 	}
 
 	return res;
 }
 
-CAPS::LIST CAPS::to_list() const {
-	return this -> operator CAPS::LIST();
+CAPS::SET& CAPS::at(const CAP::SET& set) {
+
+	if ( set == CAP::SET::BOUNDING )
+		return this -> bounding;
+	else if ( set == CAP::SET::PERMITTED )
+		return this -> permitted;
+	else if ( set == CAP::SET::INHERITABLE )
+		return this -> inheritable;
+	else if ( set == CAP::SET::EFFECTIVE )
+		return this -> effective;
+
+	return this -> ambient;
 }
 
-std::set<CAP>& CAPS::at(const CAP::SET& set) {
-	return this -> _m.at(set);
+const CAPS::SET& CAPS::at(const CAP::SET& set) const {
+
+	if ( set == CAP::SET::BOUNDING )
+		return std::as_const(this -> bounding);
+	else if ( set == CAP::SET::PERMITTED )
+		return std::as_const(this -> permitted);
+	else if ( set == CAP::SET::INHERITABLE )
+		return std::as_const(this -> inheritable);
+	else if ( set == CAP::SET::EFFECTIVE )
+		return std::as_const(this -> effective);
+
+	return std::as_const(this -> ambient);
 }
 
-const std::set<CAP>& CAPS::at(const CAP::SET& set) const {
-	return this -> _m.at(set);
+CAPS::SET& CAPS::operator [](const CAP::SET& set) {
+	return this -> at(set);
 }
 
-std::set<CAP>& CAPS::operator [](const CAP::SET& set) {
-	return this -> _m.at(set);
-}
-
-const std::set<CAP>& CAPS::operator [](const CAP::SET& set) const {
-	return this -> _m.at(set);
+const CAPS::SET& CAPS::operator [](const CAP::SET& set) const {
+	return this -> at(set);
 }
 
 CAPS::iterator CAPS::begin() {
-	return this -> _m.begin();
+	return CAPS::iterator(*this, 0);
 }
 
 CAPS::const_iterator CAPS::begin() const {
-	return this -> _m.begin();
+	return CAPS::const_iterator(*this, 0);
 }
 
 CAPS::const_iterator CAPS::cbegin() const {
-	return this -> _m.begin();
+	return CAPS::const_iterator(*this, 0);
 }
 
 CAPS::iterator CAPS::end() {
-	return this -> _m.end();
+	return CAPS::iterator(*this, 5);
 }
 
 CAPS::const_iterator CAPS::end() const {
-	return this -> _m.end();
+	return CAPS::const_iterator(*this, 5);
 }
 
 CAPS::const_iterator CAPS::cend() const {
-	return this -> _m.end();
+	return CAPS::const_iterator(*this, 5);
 }
 
 bool CAPS::empty() const {
-	return this -> _m.empty();
+	return this -> bounding.empty() && this -> permitted.empty() &&
+		this -> inheritable.empty() && this -> effective.empty() &&
+		this -> ambient.empty();
 }
 
 CAPS::size_type CAPS::size() const {
-	return this -> _m.size();
+	return CAP::sets_max();
 }
 
 CAPS::size_type CAPS::max_size() const {
-	return 5;
+	return CAP::sets_max();
 }
 
 void CAPS::clear() {
-	this -> _m.clear();
+	this -> bounding.clear();
+	this -> permitted.clear();
+	this -> inheritable.clear();
+	this -> effective.empty();
+	this -> ambient.empty();
 }
 
-void CAPS::emplace(const CAP::SET& s, const std::set<CAP>& c) {
-	this -> _m.emplace(s, c);
+void CAPS::emplace(const CAP::SET& set, const CAPS::SET& cs) {
+
+	if ( set == CAP::SET::BOUNDING )
+		this -> bounding = cs;
+	else if ( set == CAP::SET::PERMITTED )
+		this -> permitted = cs;
+	else if ( set == CAP::SET::INHERITABLE )
+		this -> inheritable = cs;
+	else if ( set == CAP::SET::EFFECTIVE )
+		this -> effective = cs;
+	else if ( set == CAP::SET::AMBIENT )
+		this -> ambient = cs;
 }
 
-void CAPS::erase(const CAP::SET& s) {
+void CAPS::emplace(const CAP::SET& set, const CAP& c) {
 
-	this -> _m.erase(s);
+	if ( set == CAP::SET::BOUNDING )
+		this -> bounding += c;
+	else if ( set == CAP::SET::PERMITTED )
+		this -> permitted += c;
+	else if ( set == CAP::SET::INHERITABLE )
+		this -> inheritable += c;
+	else if ( set == CAP::SET::EFFECTIVE )
+		this -> effective += c;
+	else if ( set == CAP::SET::AMBIENT )
+		this -> ambient += c;
 }
 
-CAPS::iterator CAPS::find(const CAP::SET& s) {
+void CAPS::emplace(const CAP::SET& set, const CAP::TYPE& c) {
 
-	return this -> _m.find(s);
+	this -> emplace(set, CAP(c));
 }
 
-CAPS::const_iterator CAPS::find(const CAP::SET& s) const {
+void CAPS::erase(const CAP::SET& set) {
 
-	return this -> _m.find(s);
+	if ( set == CAP::SET::BOUNDING )
+		this -> bounding.clear();
+	else if ( set == CAP::SET::PERMITTED )
+		this -> permitted.clear();
+	else if ( set == CAP::SET::INHERITABLE )
+		this -> inheritable.clear();
+	else if ( set == CAP::SET::EFFECTIVE )
+		this -> effective.clear();
+	else if ( set == CAP::SET::AMBIENT )
+		this -> ambient.clear();
 }
 
-bool CAPS::contains(const CAP::SET& s) const {
-	return this -> _m.find(s) != this -> _m.end();
+void CAPS::erase(const CAP::SET& set, const CAP& c) {
+
+	if ( set == CAP::SET::BOUNDING )
+		this -> bounding -= c;
+	else if ( set == CAP::SET::PERMITTED )
+		this -> permitted -= c;
+	else if ( set == CAP::SET::INHERITABLE )
+		this -> inheritable -= c;
+	else if ( set == CAP::SET::EFFECTIVE )
+		this -> effective -= c;
+	else if ( set == CAP::SET::AMBIENT )
+		this -> ambient -= c;
+}
+
+void CAPS::erase(const CAP::SET& set, const CAP::TYPE& c) {
+
+	this -> erase(set, CAP(c));
+}
+
+CAPS::iterator CAPS::find(const CAP::SET& set) {
+
+	return CAPS::iterator(*this, CAPS::set_to_idx(set));
+}
+
+CAPS::const_iterator CAPS::find(const CAP::SET& set) const {
+
+	return CAPS::const_iterator(*this, CAPS::set_to_idx(set));
+}
+
+bool CAPS::contains(const CAP::SET& set) const {
+
+	return set == CAP::SET::BOUNDING || set == CAP::SET::PERMITTED || set == CAP::SET::INHERITABLE ||
+			set == CAP::SET::EFFECTIVE || set == CAP::SET::AMBIENT;
 }
 
 CAPS::CAPS() {
-	this -> _m = {};
+	this -> bounding = {};
+	this -> permitted = {};
+	this -> inheritable = {};
+	this -> effective = {};
+	this -> ambient = {};
 }
 
 CAPS::CAPS(const CAPS& other) {
-	this -> _m = other._m;
+	this -> bounding = other.bounding;
+	this -> permitted = other.permitted;
+	this -> inheritable = other.inheritable;
+	this -> effective = other.effective;
+	this -> ambient = other.ambient;
 }
 
-CAPS::CAPS(const std::map<CAP::SET, std::set<CAP>>& m) {
-	this -> _m = m;
-}
+CAPS::CAPS(const std::initializer_list<std::pair<CAP::SET, CAPS::SET>>& values) {
 
-CAPS::CAPS(const std::initializer_list<std::pair<CAP::SET, std::set<CAP>>>& values) {
+	this -> bounding = {};
+	this -> permitted = {};
+	this -> inheritable = {};
+	this -> effective = {};
+	this -> ambient = {};
 
-	this -> _m = {};
+	for ( auto& p : values ) {
 
-	for ( auto& p : values )
-		this -> _m.emplace(p.first, p.second);
+		if ( p.first == CAP::SET::BOUNDING )
+			this -> bounding = p.second;
+		else if ( p.first == CAP::SET::PERMITTED )
+			this -> permitted = p.second;
+		else if ( p.first == CAP::SET::INHERITABLE )
+			this -> inheritable = p.second;
+		else if ( p.first == CAP::SET::EFFECTIVE )
+			this -> effective = p.second;
+		else if ( p.first == CAP::SET::AMBIENT )
+			this -> ambient = p.second;
+	}
 }
 
 CAPS::CAPS(const CAPS::LIST& l) {
 
-	this -> _m = {};
+	this -> bounding = {};
+	this -> permitted = {};
+	this -> inheritable = {};
+	this -> effective = {};
+	this -> ambient = {};
 
 	for ( auto& p : l ) {
 
@@ -209,65 +335,107 @@ CAPS::CAPS(const CAPS::LIST& l) {
 
 		for ( auto& s: p.second ) {
 
-			std::set<CAP> caps;
-
-			if ( this -> contains(s))
-				caps = this -> _m.at(s);
-
-			caps.emplace(p.first);
-			this -> _m.emplace(s, caps);
+			if ( s == CAP::SET::BOUNDING )
+				this -> bounding += p.first;
+			else if ( s == CAP::SET::PERMITTED )
+				this -> permitted += p.first;
+			else if ( s == CAP::SET::INHERITABLE )
+				this -> inheritable += p.first;
+			else if ( s == CAP::SET::EFFECTIVE )
+				this -> effective += p.first;
+			else if ( s == CAP::SET::AMBIENT )
+				this -> ambient += p.first;
 		}
 	}
 }
 
-bool CAPS::set(const CAPS& c) {
+CAP::SET CAPS::idx_to_set(int idx) {
 
-	std::map<CAP::SET, std::set<CAP>> l = c._m;
-	std::set<CAP> all_types = {};
+	switch ( idx ) {
+		case 0: return CAP::SET::BOUNDING;
+		case 1: return CAP::SET::PERMITTED;
+		case 2: return CAP::SET::INHERITABLE;
+		case 3: return CAP::SET::EFFECTIVE;
+		default: return CAP::SET::AMBIENT;
+	}
+	return CAP::SET::AMBIENT;
+}
 
-	std::set<CAP> bounding = l[CAP::SET::BOUNDING];
-	std::set<CAP> permitted = l[CAP::SET::PERMITTED];
-	std::set<CAP> inheritable = l[CAP::SET::INHERITABLE];
-	std::set<CAP> effective = l[CAP::SET::EFFECTIVE];
-	std::set<CAP> ambient = l[CAP::SET::AMBIENT];
+int CAPS::set_to_idx(const CAP::SET& set) {
+
+	if ( set == CAP::SET::BOUNDING )
+		return 0;
+	else if ( set == CAP::SET::PERMITTED )
+		return 1;
+	else if ( set == CAP::SET::INHERITABLE )
+		return 2;
+	else if ( set == CAP::SET::EFFECTIVE )
+		return 3;
+	else if ( set == CAP::SET::AMBIENT )
+		return 4;
+
+	return 4;
+}
+
+void CAPS::update_ambient(const CAPS::SET& _ambient) {
+
+	this -> ambient.clear();
+	this -> ambient = _ambient;
+}
+
+void CAPS::update_ambient(const CAPS::SET& _ambient) const {
+}
+
+void CAPS::set() const {
+
+	bool validated = true;
 	bool updated = false;
 
-	for ( const auto& e : CAPS::all())
-		all_types.emplace(CAP(e));
+	CAPS::SET all = CAPS::all();
+	CAPS::SET _bounding = this -> bounding;
+	CAPS::SET _permitted = this -> permitted;
+	CAPS::SET _inheritable = this -> inheritable;
+	CAPS::SET _effective = this -> effective;
+	CAPS::SET _ambient = this -> ambient;
 
-	capng_clear(CAPNG_SELECT_ALL);
+	for ( const auto& e : all ) {
 
-	for ( const auto& e : all_types ) {
-
-		if ( auto it = ambient.find(e); it != ambient.end() && !contains_cap(bounding, e) && !contains_cap(permitted, e) && !contains_cap(inheritable, e)) {
-			std::cerr << "removed " << e.to_string() <<
-				" from ambient set, it must also belong to bounding, permitted and inheritable sets if ambient is used" << std::endl;
-			ambient.erase(it);
+		if ( _ambient.contains(e) && !_bounding.contains(e) && !_permitted.contains(e) && !_inheritable.contains(e)) {
+			std::cerr << "removed " << e.to_string() << " from ambient set, capability must also be included in bounding, permitted and inheritable sets" << std::endl;
+			_ambient.erase(e);
+			validated = false;
 		}
+
+		if ( !_bounding.contains(e) && !_permitted.contains(e) && !_inheritable.contains(e) &&
+			!_effective.contains(e) && !_ambient.contains(e))
+			continue;
 
 		int sets = 0;
 
-		if ( contains_cap(bounding, e))
+		if ( _bounding.contains(e))
 			sets |= CAPNG_BOUNDING_SET;
-		if ( contains_cap(permitted, e))
+		if ( _permitted.contains(e))
 			sets |= CAPNG_PERMITTED;
-		if ( contains_cap(inheritable, e))
+		if ( _inheritable.contains(e))
 			sets |= CAPNG_INHERITABLE;
-		if ( contains_cap(effective, e))
+		if ( _effective.contains(e))
 			sets |= CAPNG_EFFECTIVE;
-		if ( contains_cap(ambient, e))
+		if ( _ambient.contains(e))
 			sets |= CAPNG_AMBIENT;
 
-		if ( sets != 0 ) {
+		if ( !updated ) {
 			updated = true;
-			capng_update(CAPNG_ADD, sets, e.value());
+			capng_clear(CAPNG_SELECT_ALL);
 		}
+
+		capng_update(CAPNG_ADD, sets, e.value());
 	}
 
 	if ( updated && capng_apply(CAPNG_SELECT_ALL))
-		return false;
+		throw std::runtime_error("failed to set capabilities, " + err_desc());
 
-	return true;
+	if ( !validated )
+		this -> update_ambient(_ambient);
 }
 
 CAPS CAPS::get(pid_t pid) {
@@ -275,91 +443,108 @@ CAPS CAPS::get(pid_t pid) {
 	capng_clear(CAPNG_SELECT_ALL);
 	capng_setpid(pid < 1 ? ::getpid() : pid);
 
-	if ( capng_get_caps_process()) {
-		std::cerr << "failed to get capabilities for pid " << pid << std::endl;
-		return {};
+	if ( capng_get_caps_process())
+		throw std::runtime_error("failed to get capabilities for pid " + std::to_string(pid) + ", " + err_desc());
+
+	CAPS::SET all = CAPS::all();
+	CAPS::SET _bounding = {};
+	CAPS::SET _permitted = {};
+	CAPS::SET _inheritable = {};
+	CAPS::SET _effective = {};
+	CAPS::SET _ambient = {};
+
+	for ( const auto& e : all ) {
+
+		if ( capng_have_capability(CAPNG_BOUNDING_SET, e.value()) != 0 )
+			_bounding += e;
+		if ( capng_have_capability(CAPNG_PERMITTED, e.value()) != 0 )
+			_permitted += e;
+		if ( capng_have_capability(CAPNG_INHERITABLE, e.value()) != 0 )
+			_inheritable += e;
+		if ( capng_have_capability(CAPNG_EFFECTIVE, e.value()) != 0 )
+			_effective += e;
+		if ( capng_have_capability(CAPNG_AMBIENT, e.value()) != 0 )
+			_ambient += e;
 	}
 
-	std::set<CAP> bounding = {};
-	std::set<CAP> permitted = {};
-	std::set<CAP> inheritable = {};
-	std::set<CAP> effective = {};
-	std::set<CAP> ambient = {};
-
-	for ( const auto& e : CAPS::all()) {
-
-		if ( capng_have_capability(CAPNG_BOUNDING_SET, e) != 0 )
-			bounding.emplace(CAP(e));
-
-		if ( capng_have_capability(CAPNG_PERMITTED, e) != 0 )
-			permitted.emplace(CAP(e));
-
-		if ( capng_have_capability(CAPNG_INHERITABLE, e) != 0 )
-			inheritable.emplace(CAP(e));
-
-		if ( capng_have_capability(CAPNG_EFFECTIVE, e) != 0 )
-			effective.emplace(CAP(e));
-
-		if ( capng_have_capability(CAPNG_AMBIENT, e) != 0 )
-			ambient.emplace(CAP(e));
-	}
-
-	CAPS c = {
-		{ CAP::SET::BOUNDING, bounding },
-		{ CAP::SET::PERMITTED, permitted },
-		{ CAP::SET::INHERITABLE, inheritable },
-		{ CAP::SET::EFFECTIVE, effective },
-		{ CAP::SET::AMBIENT, ambient }
+	return {
+		{ CAP::SET::BOUNDING, _bounding },
+		{ CAP::SET::PERMITTED, _permitted },
+		{ CAP::SET::INHERITABLE, _inheritable },
+		{ CAP::SET::EFFECTIVE, _effective },
+		{ CAP::SET::AMBIENT, _ambient }
 	};
 
-	return c;
 }
 
-bool CAPS::lock() {
+void CAPS::lock() {
 
-	return capng_lock() == 0;
+	if ( capng_lock() != 0 )
+		throw std::runtime_error("prctl failed, " + err_desc());
 }
 
-bool CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids, const CAPS& caps) {
+void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids) const {
 
-	std::set<CAP> bounding = caps[CAP::SET::BOUNDING];
-	std::set<CAP> permitted = caps[CAP::SET::PERMITTED];
-	std::set<CAP> inheritable = caps[CAP::SET::INHERITABLE];
-	std::set<CAP> effective = caps[CAP::SET::EFFECTIVE];
-	std::set<CAP> ambient = caps[CAP::SET::AMBIENT];
+	bool validated = true;
 
-	permitted.emplace(CAP::SETPCAP);
-	permitted.emplace(CAP::SETGID);
-	permitted.emplace(CAP::SETUID);
-	effective.emplace(CAP::SETPCAP);
-	effective.emplace(CAP::SETGID);
-	effective.emplace(CAP::SETUID);
+	CAPS::SET all = CAPS::all();
+	CAPS::SET _bounding = this -> bounding;
+	CAPS::SET _permitted = this -> permitted;
+	CAPS::SET _inheritable = this -> inheritable;
+	CAPS::SET _effective = this -> effective;
+	CAPS::SET _ambient = this -> ambient;
+
+	for ( const auto& e : all ) {
+
+		if ( _ambient.contains(e) && !_bounding.contains(e) && !_permitted.contains(e) && !_inheritable.contains(e)) {
+			std::cerr << "removed " << e.to_string() << " from ambient set, capability must also be included in bounding, permitted and inheritable sets" << std::endl;
+			_ambient.erase(e);
+			validated = false;
+		}
+	}
+
+	_permitted += CAP(CAP::SETPCAP);
+	_permitted += CAP(CAP::SETGID);
+	_permitted += CAP(CAP::SETUID);
+	_effective += CAP(CAP::SETPCAP);
+	_effective += CAP(CAP::SETGID);
+	_effective += CAP(CAP::SETUID);
 
 	if ( ::prctl(PR_SET_SECUREBITS, SECBIT_NO_SETUID_FIXUP) != 0 )
-		return false;
+		throw std::runtime_error("prctl failed to set securebits");
 
 	if ( ::prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0 )
-		return false;
+		throw std::runtime_error("prctl failed to set keepcaps");
 
 	CAPS _caps = {
-		{ CAP::SET::BOUNDING, bounding },
-		{ CAP::SET::PERMITTED, permitted },
-		{ CAP::SET::INHERITABLE, inheritable },
-		{ CAP::SET::EFFECTIVE, effective },
-		{ CAP::SET::AMBIENT, ambient }
+		{ CAP::SET::BOUNDING, _bounding },
+		{ CAP::SET::PERMITTED, _permitted },
+		{ CAP::SET::INHERITABLE, _inheritable },
+		{ CAP::SET::EFFECTIVE, _effective },
+		{ CAP::SET::AMBIENT, _ambient }
 	};
 
-	if ( !CAPS::set(_caps))
-		return false;
+	try {
+		_caps.set();
+	} catch ( ... ) {
+		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+		throw std::runtime_error("failed to set capabilities for user, " + err_desc());
+	}
 
-	if ( passwd* pw = ::getpwuid(uid); pw != nullptr && ::initgroups(pw -> pw_name, gid) != 0 )
-		return false;
+	if ( passwd* pw = ::getpwuid(uid); gid >= 0 && pw != nullptr && ::initgroups(pw -> pw_name, gid) != 0 ) {
+		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+		throw std::runtime_error("failed to initgroups, " + err_desc());
+	}
 
-	if ( ::setresgid(gid, gid, gid) != 0 )
-		return false;
+	if ( gid >= 0 && ::setresgid(gid, gid, gid) != 0 ) {
+		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+		throw std::runtime_error("failed to set group to " + std::to_string(gid) + ", " + err_desc());
+	}
 
-	if ( ::setresuid(uid, uid, uid) != 0 )
-		return false;
+	if ( ::setresuid(uid, uid, uid) != 0 ) {
+		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+		throw std::runtime_error("failed to set user to " + std::to_string(uid) + ", " + err_desc());
+	}
 
 	if ( !additional_gids.empty()) {
 
@@ -369,80 +554,85 @@ bool CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 				gids.push_back(g);
 
 		if ( !gids.empty() && ::setgroups(gids.size(), &gids[0]) != 0 )
-			return false;
+			throw std::runtime_error("failed to set groups, " + err_desc());
 	}
 
 	if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
-		return false;
+		throw std::runtime_error("prctl failed to unset keepcaps");
 
 	bool permitted_changed = false;
 	bool effective_changed = false;
 
-	if ( !contains_cap(caps[CAP::SET::PERMITTED], CAP::SETPCAP)) {
+	if ( !this -> permitted.contains(CAP(CAP::SETUID))) {
 		permitted_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETPCAP);
+		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETUID);
 	}
 
-	if ( !contains_cap(caps[CAP::SET::PERMITTED], CAP::SETGID)) {
+	if ( !this -> permitted.contains(CAP(CAP::SETGID))) {
 		permitted_changed = true;
 		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETGID);
 	}
 
-	if ( !contains_cap(caps[CAP::SET::PERMITTED], CAP::SETPCAP)) {
+	if ( !this -> permitted.contains(CAP(CAP::SETPCAP))) {
 		permitted_changed = true;
 		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETPCAP);
 	}
 
-	if ( !contains_cap(caps[CAP::SET::EFFECTIVE], CAP::SETPCAP)) {
+	if ( !this -> effective.contains(CAP(CAP::SETUID))) {
 		effective_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETPCAP);
+		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETUID);
 	}
 
-	if ( !contains_cap(caps[CAP::SET::EFFECTIVE], CAP::SETGID)) {
+	if ( !this -> effective.contains(CAP(CAP::SETGID))) {
 		effective_changed = true;
 		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETGID);
 	}
 
-	if ( !contains_cap(caps[CAP::SET::EFFECTIVE], CAP::SETPCAP)) {
+	if ( !this -> effective.contains(CAP(CAP::SETPCAP))) {
 		effective_changed = true;
 		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETPCAP);
 	}
 
 	if (( permitted_changed || effective_changed ) && capng_apply(CAPNG_SELECT_CAPS) != 0 )
-		return false;
+		throw std::runtime_error("failed to drop capabilities setuid, setgid and setpcap, " + err_desc());
 
-	return true;
+	if ( !validated )
+		this -> update_ambient(_ambient);
+
 }
 
 std::ostream& operator <<(std::ostream& os, const CAPS& c) {
 
 	std::string s;
 
-	for ( auto& cap : c ) {
+	for ( auto it = c.begin(); it != c.end(); it++ ) {
 
 		if ( !s.empty())
 			s += '\n';
 
-		if ( cap.first == CAP::SET::BOUNDING )
+		if ( it.set() == CAP::SET::BOUNDING )
 			s += "bounding:    ";
-		else if ( cap.first == CAP::SET::PERMITTED )
+		else if ( it.set() == CAP::SET::PERMITTED )
 			s += "permitted:   ";
-		else if ( cap.first == CAP::SET::INHERITABLE )
+		else if ( it.set() == CAP::SET::INHERITABLE )
 			s += "inheritable: ";
-		else if ( cap.first == CAP::SET::EFFECTIVE )
+		else if ( it.set() == CAP::SET::EFFECTIVE )
 			s += "effective:   ";
-		else if ( cap.first == CAP::SET::AMBIENT )
+		else if ( it.set() == CAP::SET::AMBIENT )
 			s += "ambient:     ";
 
 		std::string l;
 
-		for ( auto& n : cap.second ) {
+		for ( auto& n : *it ) {
 
 			if ( !l.empty())
 				l += ", ";
 
 			l += n.to_string();
 		}
+
+		if ( it -> empty())
+			s += '-';
 
 		s += l;
 	}
@@ -458,25 +648,26 @@ std::ostream& operator <<(std::ostream& os, const CAPS::LIST& l) {
 	for ( const auto& e : l ) {
 
 		CAP c = e.first;
-		std::set<CAP::SET> s = e.second;
+		std::set<CAP::SET> sets = e.second;
 
 		if ( !res.empty())
 			res += '\n';
 
 		res += c.to_string();
-		res += '\t';
+		res += c.type() != CAP::CHECKPOINT_RESTORE ? "\t\t" : "\t";
 
 		if ( c.type() != CAP::DAC_OVERRIDE && c.type() != CAP::DAC_READ_SEARCH && c.type() != CAP::LINUX_IMMUTABLE &&
 			c.type() != CAP::NET_BIND_SERVICE && c.type() != CAP::NET_BROADCAST && c.type() != CAP::SYS_RESOURCE &&
-			c.type() != CAP::SYS_TTY_CONFIG && c.type() != CAP::AUDIT_CONTROL && c.type() != CAP::MAC_OVERRIDE && c.type() != CAP::BLOCK_SUSPEND )
-			res += '\t';
+			c.type() != CAP::SYS_TTY_CONFIG && c.type() != CAP::AUDIT_CONTROL && c.type() != CAP::MAC_OVERRIDE &&
+			c.type() != CAP::BLOCK_SUSPEND )
+			res += c.type() != CAP::BPF ? "\t" : "\t\t";
 
 		res +=
-			" bounding: " + std::string( contains_capset(s, CAP::SET::BOUNDING) ? "true " : "false" ) +
-			" effective: " + std::string( contains_capset(s, CAP::SET::EFFECTIVE) ? "true " : "false" ) +
-			" permitted: " + std::string( contains_capset(s, CAP::SET::PERMITTED) ? "true " : "false" ) +
-			" inheritable: " + std::string( contains_capset(s, CAP::SET::INHERITABLE) ? "true " : "false" ) +
-			" ambient: " + std::string( /*s.contains*/contains_capset(s, CAP::SET::AMBIENT) ? "true" : "false" );
+			" bounding: " + std::string(sets.find(CAP::SET::BOUNDING) != sets.end() ? "true " : "false" ) +
+			" effective: " + std::string(sets.find(CAP::SET::EFFECTIVE) != sets.end() ? "true " : "false" ) +
+			" permitted: " + std::string(sets.find(CAP::SET::PERMITTED) != sets.end() ? "true " : "false" ) +
+			" inheritable: " + std::string(sets.find(CAP::SET::INHERITABLE) != sets.end() ? "true " : "false" ) +
+			" ambient: " + std::string(sets.find(CAP::SET::AMBIENT) != sets.end() ? "true" : "false" );
 	}
 
 	os << res;

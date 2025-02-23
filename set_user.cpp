@@ -21,11 +21,11 @@ bool update_caps() {
 		{ CAP::SET::AMBIENT, { CAP::SYS_CHROOT }}
 	};
 
-	if ( !CAPS::set_user(1002, 1002, { 101, 453, 514 }, caps)) {
-
-		std::cerr << "failed to change user" << std::endl;
+	try {
+		caps.set_user(1002, 1002, { 101, 453, 514 });
+	} catch ( const std::runtime_error& e ) {
+		std::cerr << e.what() << std::endl;
 		return false;
-
 	}
 
 	return true;
