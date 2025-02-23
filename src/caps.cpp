@@ -420,8 +420,6 @@ std::ostream& operator <<(std::ostream& os, const CAPS& c) {
 
 	for ( auto& cap : c ) {
 
-		std::cout << c << std::endl;
-
 		if ( !s.empty())
 			s += '\n';
 
