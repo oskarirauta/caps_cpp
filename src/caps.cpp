@@ -483,6 +483,16 @@ void CAPS::lock() {
 		throw std::runtime_error("prctl failed, " + err_desc());
 }
 
+static std::string short_cap(const CAP& c) {
+
+	std::string s = c.to_string();
+
+	if ( s.substr(0, 4) == "cap_" )
+		s.erase(0, 4);
+
+	return s;
+}
+
 void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids) const {
 
 	bool validated = true;
@@ -503,18 +513,16 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 		}
 	}
 
-	_permitted += CAP(CAP::SETPCAP);
-	_permitted += CAP(CAP::SETGID);
-	_permitted += CAP(CAP::SETUID);
-	_effective += CAP(CAP::SETPCAP);
-	_effective += CAP(CAP::SETGID);
-	_effective += CAP(CAP::SETUID);
+	for ( const CAP& c : { CAP(CAP::SETPCAP), CAP(CAP::SETGID), CAP(CAP::SETUID) }) {
+		_permitted += c;
+		_effective += c;
+	}
 
 	if ( ::prctl(PR_SET_SECUREBITS, SECBIT_NO_SETUID_FIXUP) != 0 )
-		throw std::runtime_error("prctl failed to set securebits");
+		throw std::runtime_error("prctl failed to set securebits, " + err_desc());
 
 	if ( ::prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0 )
-		throw std::runtime_error("prctl failed to set keepcaps");
+		throw std::runtime_error("prctl failed to set keepcaps, " + err_desc());
 
 	CAPS _caps = {
 		{ CAP::SET::BOUNDING, _bounding },
@@ -527,22 +535,38 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 	try {
 		_caps.set();
 	} catch ( ... ) {
-		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+
+		int _errno = errno;
+		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
+			errno = _errno;
+
 		throw std::runtime_error("failed to set capabilities for user, " + err_desc());
 	}
 
 	if ( passwd* pw = ::getpwuid(uid); gid >= 0 && pw != nullptr && ::initgroups(pw -> pw_name, gid) != 0 ) {
-		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+
+		int _errno = errno;
+		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
+			errno = _errno;
+
 		throw std::runtime_error("failed to initgroups, " + err_desc());
 	}
 
 	if ( gid >= 0 && ::setresgid(gid, gid, gid) != 0 ) {
-		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+
+		int _errno = errno;
+		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
+			errno = _errno;
+
 		throw std::runtime_error("failed to set group to " + std::to_string(gid) + ", " + err_desc());
 	}
 
 	if ( ::setresuid(uid, uid, uid) != 0 ) {
-		::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0);
+
+		int _errno = errno;
+		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
+			errno = _errno;
+
 		throw std::runtime_error("failed to set user to " + std::to_string(uid) + ", " + err_desc());
 	}
 
@@ -558,43 +582,45 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 	}
 
 	if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
-		throw std::runtime_error("prctl failed to unset keepcaps");
+		throw std::runtime_error("prctl failed to unset keepcaps, " + err_desc());
 
-	bool permitted_changed = false;
-	bool effective_changed = false;
+	std::vector<std::string> caps_to_drop;
 
-	if ( !this -> permitted.contains(CAP(CAP::SETUID))) {
-		permitted_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETUID);
+	for ( const CAP& cap : { CAP(CAP::SETPCAP), CAP(CAP::SETGID), CAP(CAP::SETUID), CAP(CAP::SYS_CHROOT), CAP(CAP::SETFCAP) }) {
+
+		if ( !this -> permitted.contains(cap)) {
+
+			caps_to_drop.push_back(short_cap(cap));
+			capng_update(CAPNG_DROP, CAPNG_PERMITTED, cap.value());
+		}
+
+		if ( !this -> effective.contains(cap)) {
+
+			if ( caps_to_drop.back() != short_cap(cap))
+				caps_to_drop.push_back(short_cap(cap));
+			capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, cap.value());
+		}
 	}
 
-	if ( !this -> permitted.contains(CAP(CAP::SETGID))) {
-		permitted_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETGID);
-	}
 
-	if ( !this -> permitted.contains(CAP(CAP::SETPCAP))) {
-		permitted_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_PERMITTED, CAP::SETPCAP);
-	}
+	if ( !caps_to_drop.empty() && capng_apply(CAPNG_SELECT_CAPS) != 0 ) {
 
-	if ( !this -> effective.contains(CAP(CAP::SETUID))) {
-		effective_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETUID);
-	}
+		std::vector<std::string>::size_type i = 0;
+		std::string caps_str;
 
-	if ( !this -> effective.contains(CAP(CAP::SETGID))) {
-		effective_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETGID);
-	}
+		for ( const auto& _s : caps_to_drop ) {
 
-	if ( !this -> effective.contains(CAP(CAP::SETPCAP))) {
-		effective_changed = true;
-		capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, CAP::SETPCAP);
-	}
+			i++;
+			if ( _s.empty())
+				continue;
 
-	if (( permitted_changed || effective_changed ) && capng_apply(CAPNG_SELECT_CAPS) != 0 )
-		throw std::runtime_error("failed to drop capabilities setuid, setgid and setpcap, " + err_desc());
+			if ( !caps_str.empty())
+				caps_str += i == caps_to_drop.size() ? " and " : ", ";
+			caps_str += _s;
+		}
+
+		throw std::runtime_error("failed to drop capabilities " + caps_str + ", " + err_desc());
+        }
 
 	if ( !validated )
 		this -> update_ambient(_ambient);
