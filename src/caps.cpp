@@ -598,7 +598,35 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 
 	if ( !validated )
 		this -> update_ambient(_ambient);
+}
 
+void CAPS::validate_ambient() {
+
+	CAPS::SET all = CAPS::all();
+	CAPS::SET _ambient = this -> ambient;
+
+	std::string removed;
+
+        for ( const auto& e : all ) {
+
+                if ( _ambient.contains(e) && !this -> bounding.contains(e) &&
+			!this -> permitted.contains(e) && !this -> inheritable.contains(e)) {
+
+			if ( !removed.empty())
+				removed += ' ';
+
+			removed += e.to_string();
+                        _ambient.erase(e);
+                }
+        }
+
+	if ( !removed.empty()) {
+
+		this -> ambient = ambient;
+
+		throw std::runtime_error("following capabilities were removed from ambient set, because they are not part of bounding, permitted and inheritable sets:\n" +
+			removed);
+	}
 }
 
 std::ostream& operator <<(std::ostream& os, const CAPS& c) {

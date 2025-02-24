@@ -153,6 +153,7 @@ class CAPS {
 
 		void set() const;
 		void set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids) const;
+		void validate_ambient(); // try, catches a warning if ambient set was fixed, can be ignored
 
 		static CAPS::SET all();
 		static CAPS get(pid_t pid = -1);
