@@ -3,7 +3,7 @@
 #include <utility>
 #include <algorithm>
 #include <stdexcept>
-#include <sys/capability.h>
+#include <linux/capability.h>	// CAP_* constants only; the actual work uses bundled cap-ng
 #include "cap-ng/cap-ng.hpp"
 #include "capabilities.hpp"
 

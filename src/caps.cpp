@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <sys/prctl.h>
 #include <sys/types.h>
-#include <sys/capability.h>
+#include <linux/capability.h>	// CAP_* constants only; the actual work uses bundled cap-ng
 #include <linux/securebits.h>
 #include "cap-ng/cap-ng.hpp"
 #include "capabilities/cap.hpp"
@@ -543,7 +543,7 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 		throw std::runtime_error("failed to set capabilities for user, " + err_desc());
 	}
 
-	if ( passwd* pw = ::getpwuid(uid); gid >= 0 && pw != nullptr && ::initgroups(pw -> pw_name, gid) != 0 ) {
+	if ( passwd* pw = ::getpwuid(uid); gid != (gid_t)-1 && pw != nullptr && ::initgroups(pw -> pw_name, gid) != 0 ) {
 
 		int _errno = errno;
 		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
@@ -552,7 +552,7 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 		throw std::runtime_error("failed to initgroups, " + err_desc());
 	}
 
-	if ( gid >= 0 && ::setresgid(gid, gid, gid) != 0 ) {
+	if ( gid != (gid_t)-1 && ::setresgid(gid, gid, gid) != 0 ) {
 
 		int _errno = errno;
 		if ( ::prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0 )
@@ -596,7 +596,7 @@ void CAPS::set_user(uid_t uid, gid_t gid, const std::set<gid_t>& additional_gids
 
 		if ( !this -> effective.contains(cap)) {
 
-			if ( caps_to_drop.back() != short_cap(cap))
+			if ( caps_to_drop.empty() || caps_to_drop.back() != short_cap(cap))
 				caps_to_drop.push_back(short_cap(cap));
 			capng_update(CAPNG_DROP, CAPNG_EFFECTIVE, cap.value());
 		}
@@ -648,7 +648,7 @@ void CAPS::validate_ambient() {
 
 	if ( !removed.empty()) {
 
-		this -> ambient = ambient;
+		this -> ambient = _ambient;	// keep the validated (cleaned) ambient set
 
 		throw std::runtime_error("following capabilities were removed from ambient set, because they are not part of bounding, permitted and inheritable sets:\n" +
 			removed);
